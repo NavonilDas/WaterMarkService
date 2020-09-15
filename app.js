@@ -5,8 +5,12 @@ const Queue = require('bee-queue');
 const imageQueue = new Queue('Adding Image Watermark', { redis: { port: 6379, host: '127.0.0.1' } });
 const path = require('path');
 const Jimp = require('jimp');
+const fs = require('fs');
 const COMPLETED = {};
 const FAILED = {};
+const LOGO_SIZE = 40;
+const OFFSET = 10;
+
 
 app.use(express.static(__dirname + '/public'));
 
@@ -16,10 +20,43 @@ async function Sleep(ms) {
     });
 }
 
+async function LoadImage(path) {
+    return new Promise(resolve => {
+        Jimp.read(path, (error, image) => resolve({ error, image }));
+    });
+}
+
+
+
 imageQueue.process(async function (job, done) {
-    job.status = 'hello';
+    // console.log(job.data);
+    const text = '@watermark';
+    const img = await Jimp.read(job.data.path).catch(err => console.log(err));
+    const logo = await Jimp.read('public/smiley.png').catch(err => console.log(err));
+    const font = await Jimp.loadFont('public/roboto_medium.fnt');
+    const h = img.getHeight();
+    const w = img.getWidth();
+    const tw = Jimp.measureText(font, text);
+    const th = Jimp.measureTextHeight(font, text, tw + 2);
+    // Bottom right
+    // try {
+    const type = 0;
+    if (type == 0) {
+        // Bottom Right
+        img.print(font, w - tw - OFFSET, h - th - OFFSET, text);
+        img.composite(logo.resize(LOGO_SIZE, LOGO_SIZE), w - tw - LOGO_SIZE - 20, h - LOGO_SIZE - OFFSET, {
+            mode: Jimp.BLEND_SOURCE_OVER,
+            opacitySource: 1,
+            opacityDest: 1
+        });
+    }
+    img.write('public/' + job.data.filename);
+    // } catch (e) {
+    //     console.log(e);
+    // }
     await new Promise(resolve => setTimeout(resolve, 5000));
     console.log('done');
+    fs.unlinkSync(job.data.path); // Remove Tempoarary File
     return { img: 'ddd' };
 });
 
@@ -63,27 +100,33 @@ app.post('/upload', (req, res) => {
         else if (err) {
             return res.status(422).send({ errors: [{ title: 'Failed to Save Image', detail: err.message }] })
         }
-        // TODO Add to QUEUE
-        const job = imageQueue.createJob({ a: 'jfjfjfjf' });
+        const job = imageQueue.createJob({ path: req.file.path, filename: req.file.filename });
         job.retries(2);
         job.save().then(data => res.json({ id: data.id }));
     });
-    // res.json({});
 });
 
 app.get('/status', (req, res) => {
     let { id } = req.query;
-    id = parseInt(id);
-    if (isNaN(id)) {
-        res.status(422).send('Invalid ID');
-        return;
+    // id = parseInt(id);
+    // if (isNaN(id)) {
+    //     res.status(422).send('Invalid ID');
+    //     return;
+    // }
+    // imageQueue.getJob(id, function (err, job) {
+    //     res.json({ status: job.status });
+    //     console.log(job.data);
+    //     console.log(`Job ${id} has status ${job.status}`);
+    // });
+    if (id) {
+        if (COMPLETED[id]) {
+            res.json({ status: 'Completed', data: COMPLETED[id] });
+        } else if (FAILED[id]) {
+            res.json({ status: 'Failed', data: FAILED[id] });
+        } else {
+            res.json({ status: 'Progress' });
+        }
     }
-    imageQueue.getJob(id, function (err, job) {
-        res.json({ status: job.status });
-        console.log(job.data);
-        job.on
-        console.log(`Job ${id} has status ${job.status}`);
-    });
 });
 
 app.listen(3000, () => console.log('Started at http://localhost:3000'));
