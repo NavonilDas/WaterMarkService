@@ -17,7 +17,7 @@
   },
   "homepage": "https://github.com/NavonilDas/WaterMarkService#readme",
   "dependencies": {
-    "bee-queue": "^1.2.3",
+    "bull": "^3.18.0",
     "express": "^4.17.1",
     "jimp": "^0.16.1",
     "multer": "^1.4.2"

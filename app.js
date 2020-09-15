@@ -1,32 +1,16 @@
 const express = require('express');
 const app = express();
 const multer = require('multer');
-const Queue = require('bee-queue');
+const Queue = require('bull');
 const imageQueue = new Queue('Adding Image Watermark', { redis: { port: 6379, host: '127.0.0.1' } });
 const path = require('path');
 const Jimp = require('jimp');
 const fs = require('fs');
-const COMPLETED = {};
-const FAILED = {};
 const LOGO_SIZE = 40;
 const OFFSET = 10;
 
 
 app.use(express.static(__dirname + '/public'));
-
-async function Sleep(ms) {
-    return new Promise((resolve) => {
-        setTimeout(resolve, ms);
-    });
-}
-
-async function LoadImage(path) {
-    return new Promise(resolve => {
-        Jimp.read(path, (error, image) => resolve({ error, image }));
-    });
-}
-
-
 
 imageQueue.process(async function (job, done) {
     // console.log(job.data);
@@ -57,18 +41,11 @@ imageQueue.process(async function (job, done) {
     await new Promise(resolve => setTimeout(resolve, 5000));
     console.log('done');
     fs.unlinkSync(job.data.path); // Remove Tempoarary File
-    return { img: 'ddd' };
-});
-
-imageQueue.on('succeeded', (job, result) => {
-    COMPLETED[job.id] = result;
-});
-
-imageQueue.on('failed', (job, result) => {
-    FAILED[job.id] = result;
+    done(null, { filename: job.data.filename });
 });
 
 app.post('/upload', (req, res) => {
+    console.log(req.query);
     let upload = multer({
         storage: multer.diskStorage({
             destination: function (req, file, cb) {
@@ -100,33 +77,18 @@ app.post('/upload', (req, res) => {
         else if (err) {
             return res.status(422).send({ errors: [{ title: 'Failed to Save Image', detail: err.message }] })
         }
-        const job = imageQueue.createJob({ path: req.file.path, filename: req.file.filename });
-        job.retries(2);
-        job.save().then(data => res.json({ id: data.id }));
+        imageQueue.add({ path: req.file.path, filename: req.file.filename }).then(data => res.json(data.id));
     });
 });
 
 app.get('/status', (req, res) => {
     let { id } = req.query;
-    // id = parseInt(id);
-    // if (isNaN(id)) {
-    //     res.status(422).send('Invalid ID');
-    //     return;
-    // }
-    // imageQueue.getJob(id, function (err, job) {
-    //     res.json({ status: job.status });
-    //     console.log(job.data);
-    //     console.log(`Job ${id} has status ${job.status}`);
-    // });
-    if (id) {
-        if (COMPLETED[id]) {
-            res.json({ status: 'Completed', data: COMPLETED[id] });
-        } else if (FAILED[id]) {
-            res.json({ status: 'Failed', data: FAILED[id] });
-        } else {
-            res.json({ status: 'Progress' });
-        }
+    id = parseInt(id);
+    if (isNaN(id)) {
+        res.status(422).send('Invalid ID');
+        return;
     }
+    imageQueue.getJob(id).then(job => job.getState().then(state => res.json({ state, data: job.returnvalue })));
 });
 
 app.listen(3000, () => console.log('Started at http://localhost:3000'));
